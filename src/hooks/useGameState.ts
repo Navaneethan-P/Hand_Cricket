@@ -18,6 +18,19 @@ export const useGameState = () => {
   const [selectedMove, setSelectedMove] = useState<number | null>(null);
   const [moveSubmitted, setMoveSubmitted] = useState(false);
 
+  // Update screen based on room state changes
+  useEffect(() => {
+    if (!gameState.room) return;
+    
+    if (gameState.room.game_state === 'toss' || gameState.room.game_state === 'chooseRole') {
+      setGameState(prev => ({ ...prev, currentScreen: 'toss' }));
+    } else if (gameState.room.game_state === 'playing' || gameState.room.game_state === 'switch') {
+      setGameState(prev => ({ ...prev, currentScreen: 'game' }));
+    } else if (gameState.room.game_state === 'result') {
+      setGameState(prev => ({ ...prev, currentScreen: 'result' }));
+    }
+  }, [gameState.room?.game_state]);
+
   // Subscribe to room changes
   useEffect(() => {
     if (!gameState.room?.id) return;
