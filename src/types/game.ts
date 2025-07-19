@@ -10,12 +10,12 @@ export interface Room {
   id: string;
   player1: Player | null;
   player2: Player | null;
-  tossWinner: string | null;
+  toss_winner: string | null;
   current_batting: string | null;
   current_bowling: string | null;
-  gameState: 'waiting' | 'toss' | 'chooseRole' | 'playing' | 'switch' | 'result';
+  game_state: 'waiting' | 'toss' | 'chooseRole' | 'playing' | 'switch' | 'result';
   current_round: number;
-  movesSubmitted: number;
+  moves_submitted: number;
 }
 
 export interface GameState {

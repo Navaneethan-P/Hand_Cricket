@@ -17,21 +17,20 @@ export const TossScreen: React.FC<TossScreenProps> = ({
   const [coinFlipping, setCoinFlipping] = useState(false);
 
   const isPlayer1 = room.player1?.id === playerId;
-  const isTossWinner = (isPlayer1 && room.tossWinner === 'player1') || 
-                      (!isPlayer1 && room.tossWinner === 'player2');
-  const tossWinnerName = room.tossWinner === 'player1' ? room.player1?.name : room.player2?.name;
+  const isTossWinner = (isPlayer1 && room.toss_winner === 'player1') || 
+                      (!isPlayer1 && room.toss_winner === 'player2');
+  const tossWinnerName = room.toss_winner === 'player1' ? room.player1?.name : room.player2?.name;
 
   useEffect(() => {
-    if (room.gameState === 'toss' && room.player1 && room.player2) {
+    if (room.game_state === 'toss' && room.player1 && room.player2) {
       setCoinFlipping(true);
       setTimeout(() => {
         setCoinFlipping(false);
         setShowCoin(false);
       }, 2000);
     }
-  }, [room.gameState, room.player1, room.player2]);
+  }, [room.game_state, room.player1, room.player2]);
 
-  if (room.gameState === 'waiting') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md text-center">
@@ -75,7 +74,7 @@ export const TossScreen: React.FC<TossScreenProps> = ({
           </div>
         )}
 
-        {!showCoin && room.gameState === 'chooseRole' && isTossWinner && (
+        {!showCoin && room.game_state === 'chooseRole' && isTossWinner && (
           <div className="space-y-4">
             <button
               onClick={() => onChooseRole('bat')}
@@ -94,7 +93,6 @@ export const TossScreen: React.FC<TossScreenProps> = ({
           </div>
         )}
 
-        {!showCoin && room.gameState === 'chooseRole' && !isTossWinner && (
           <div className="flex justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
           </div>

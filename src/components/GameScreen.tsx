@@ -36,7 +36,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     return 'text-green-500 bg-green-100';
   };
 
-  const bothMovesSubmitted = room.movesSubmitted === 2;
+  const bothMovesSubmitted = room.moves_submitted === 2;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-4">
@@ -161,7 +161,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         )}
 
         {/* Role Switch Message */}
-        {room.gameState === 'switch' && (
+        {room.game_state === 'switch' && (
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
             <div className="w-16 h-16 bg-orange-500 rounded-full mx-auto mb-4 flex items-center justify-center">
               <Clock className="w-8 h-8 text-white" />

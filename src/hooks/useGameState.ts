@@ -82,12 +82,12 @@ export const useGameState = () => {
           isOut: false
         },
         player2: null,
-        tossWinner: null,
+        toss_winner: null,
         current_batting: null,
         current_bowling: null,
-        gameState: 'waiting',
+        game_state: 'waiting',
         current_round: 1,
-        movesSubmitted: 0,
+        moves_submitted: 0,
       };
 
       const { error } = await supabase
@@ -138,7 +138,7 @@ export const useGameState = () => {
           move: null,
           isOut: false
         },
-        gameState: 'toss' as const
+        game_state: 'toss' as const
       };
 
       const { error: updateError } = await supabase
@@ -174,8 +174,8 @@ export const useGameState = () => {
     const { error } = await supabase
       .from('rooms')
       .update({
-        tossWinner: tossResult,
-        gameState: 'chooseRole'
+        toss_winner: tossResult,
+        game_state: 'chooseRole'
       })
       .eq('id', gameState.room.id);
 
@@ -189,28 +189,28 @@ export const useGameState = () => {
   };
 
   const chooseRole = async (role: 'bat' | 'bowl') => {
-    if (!gameState.room || !gameState.room.tossWinner) return;
+    if (!gameState.room || !gameState.room.toss_winner) return;
 
     const isPlayer1 = gameState.room.player1?.id === gameState.playerId;
-    const isTossWinner = (isPlayer1 && gameState.room.tossWinner === 'player1') || 
-                        (!isPlayer1 && gameState.room.tossWinner === 'player2');
+    const isTossWinner = (isPlayer1 && gameState.room.toss_winner === 'player1') || 
+                        (!isPlayer1 && gameState.room.toss_winner === 'player2');
 
     if (!isTossWinner) {
       toast.error('Wait for toss winner to choose');
       return;
     }
 
-    const currentBatting = role === 'bat' ? gameState.room.tossWinner : 
-                          (gameState.room.tossWinner === 'player1' ? 'player2' : 'player1');
-    const currentBowling = role === 'bowl' ? gameState.room.tossWinner : 
-                          (gameState.room.tossWinner === 'player1' ? 'player2' : 'player1');
+    const currentBatting = role === 'bat' ? gameState.room.toss_winner : 
+                          (gameState.room.toss_winner === 'player1' ? 'player2' : 'player1');
+    const currentBowling = role === 'bowl' ? gameState.room.toss_winner : 
+                          (gameState.room.toss_winner === 'player1' ? 'player2' : 'player1');
 
     const { error } = await supabase
       .from('rooms')
       .update({
         current_batting: currentBatting,
         current_bowling: currentBowling,
-        gameState: 'playing'
+        game_state: 'playing'
       })
       .eq('id', gameState.room.id);
 
@@ -249,13 +249,13 @@ export const useGameState = () => {
       move
     };
 
-    const newMovesSubmitted = gameState.room.movesSubmitted + 1;
+    const newMovesSubmitted = gameState.room.moves_submitted + 1;
 
     const { error } = await supabase
       .from('rooms')
       .update({
         [playerKey]: updatedPlayer,
-        movesSubmitted: newMovesSubmitted
+        moves_submitted: newMovesSubmitted
       })
       .eq('id', gameState.room.id);
 
@@ -291,15 +291,15 @@ export const useGameState = () => {
       toast.error('OUT!');
       
       // Check if both players have batted
-      if (gameState.room.current_batting === gameState.room.tossWinner) {
+      if (gameState.room.current_batting === gameState.room.toss_winner) {
         // Switch roles
         updatedRoom.current_batting = gameState.room.current_bowling;
         updatedRoom.current_bowling = gameState.room.current_batting;
-        updatedRoom.gameState = 'switch';
+        updatedRoom.game_state = 'switch';
         toast.success('Switching roles!');
       } else {
         // Game over
-        updatedRoom.gameState = 'result';
+        updatedRoom.game_state = 'result';
         setGameState(prev => ({ ...prev, currentScreen: 'result' }));
       }
     } else {
@@ -314,7 +314,7 @@ export const useGameState = () => {
     // Reset moves and counter
     updatedRoom.player1.move = null;
     updatedRoom.player2.move = null;
-    updatedRoom.movesSubmitted = 0;
+    updatedRoom.moves_submitted = 0;
     updatedRoom.current_round += 1;
 
     const { error } = await supabase
@@ -328,13 +328,13 @@ export const useGameState = () => {
     }
 
     // Continue game if not ended
-    if (updatedRoom.gameState === 'playing') {
+    if (updatedRoom.game_state === 'playing') {
       setTimeout(() => startNewRound(), 2000);
-    } else if (updatedRoom.gameState === 'switch') {
+    } else if (updatedRoom.game_state === 'switch') {
       setTimeout(async () => {
         const { error: switchError } = await supabase
           .from('rooms')
-          .update({ gameState: 'playing' })
+          .update({ game_state: 'playing' })
           .eq('id', gameState.room!.id);
         
         if (!switchError) {
