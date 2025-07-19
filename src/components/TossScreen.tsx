@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Coins, Target, Shield } from 'lucide-react';
+import { Coins, Target, Shield, Users } from 'lucide-react';
 import { Room } from '../types/game';
 
 interface TossScreenProps {
@@ -31,6 +31,7 @@ export const TossScreen: React.FC<TossScreenProps> = ({
     }
   }, [room.game_state, room.player1, room.player2]);
 
+  if (!room.player2) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md text-center">
@@ -93,6 +94,7 @@ export const TossScreen: React.FC<TossScreenProps> = ({
           </div>
         )}
 
+        {!showCoin && room.game_state === 'chooseRole' && !isTossWinner && (
           <div className="flex justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
           </div>
