@@ -1,8 +1,8 @@
 import React from 'react';
-import { Target, Shield, Clock, Trophy } from 'lucide-react';
+import { Target, Shield, Clock, Trophy, Users, Star } from 'lucide-react';
 import { Room } from '../types/game';
 
-interface GameScreenProps {
+interface TeamGameScreenProps {
   room: Room;
   playerId: string;
   timeLeft: number;
@@ -13,7 +13,7 @@ interface GameScreenProps {
   onSubmitMove: () => void;
 }
 
-export const GameScreen: React.FC<GameScreenProps> = ({
+export const TeamGameScreen: React.FC<TeamGameScreenProps> = ({
   room,
   playerId,
   timeLeft,
@@ -23,10 +23,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   onSelectMove,
   onSubmitMove
 }) => {
-  const isPlayer1 = room.player1?.id === playerId;
-  const currentPlayer = isPlayer1 ? room.player1! : room.player2!;
-  const opponent = isPlayer1 ? room.player2! : room.player1!;
-  const isBatting = room.currentBatting === (isPlayer1 ? 'player1' : 'player2');
+  const playerTeam = room.teamA?.players.find(p => p.id === playerId) ? 'teamA' : 'teamB';
+  const myTeam = playerTeam === 'teamA' ? room.teamA! : room.teamB!;
+  const opponentTeam = playerTeam === 'teamA' ? room.teamB! : room.teamA!;
+  const isBatting = room.current_batting === playerTeam;
+  
+  const currentBatsman = myTeam.players.find(p => p.id === myTeam.currentBatsman);
+  const isCurrentBatsman = myTeam.currentBatsman === playerId;
+  const isMyTurn = isBatting && isCurrentBatsman;
 
   const numbers = [1, 2, 3, 4, 5, 6, 0];
 
@@ -36,6 +40,12 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     return 'text-green-500 bg-green-100';
   };
 
+  const formatOvers = (balls: number) => {
+    const overs = Math.floor(balls / 6);
+    const remainingBalls = balls % 6;
+    return `${overs}.${remainingBalls}`;
+  };
+
   const bothMovesSubmitted = room.moves_submitted === 2;
 
   return (
@@ -43,32 +53,67 @@ export const GameScreen: React.FC<GameScreenProps> = ({
       <div className="max-w-md mx-auto">
         {/* Score Header */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center mb-4">
             <div className="text-center">
               <div className={`flex items-center gap-2 mb-2 ${isBatting ? 'text-blue-500' : 'text-gray-500'}`}>
                 <Target className="w-4 h-4" />
-                <span className="font-medium">{currentPlayer.name}</span>
+                <span className="font-medium">{myTeam.name}</span>
                 {isBatting && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">BAT</span>}
               </div>
-              <div className="text-2xl font-bold text-gray-800">{currentPlayer.score}</div>
+              <div className="text-2xl font-bold text-gray-800">
+                {myTeam.totalScore}/{myTeam.wickets}
+              </div>
+              <div className="text-sm text-gray-500">
+                {formatOvers(myTeam.balls)} overs
+              </div>
             </div>
+            
             <div className="text-center">
               <div className="text-sm text-gray-500 mb-2">Round</div>
-              <div className="text-xl font-bold text-gray-800">{room.currentRound}</div>
+              <div className="text-xl font-bold text-gray-800">{room.current_round}</div>
+              {room.target && (
+                <div className="text-xs text-orange-600 mt-1">
+                  Target: {room.target}
+                </div>
+              )}
             </div>
+            
             <div className="text-center">
               <div className={`flex items-center gap-2 mb-2 ${!isBatting ? 'text-red-500' : 'text-gray-500'}`}>
                 <Shield className="w-4 h-4" />
-                <span className="font-medium">{opponent.name}</span>
+                <span className="font-medium">{opponentTeam.name}</span>
                 {!isBatting && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full">BOWL</span>}
               </div>
-              <div className="text-2xl font-bold text-gray-800">{opponent.score}</div>
+              <div className="text-2xl font-bold text-gray-800">
+                {opponentTeam.totalScore}/{opponentTeam.wickets}
+              </div>
+              <div className="text-sm text-gray-500">
+                {formatOvers(opponentTeam.balls)} overs
+              </div>
             </div>
           </div>
+
+          {/* Current Batsman */}
+          {isBatting && currentBatsman && (
+            <div className="border-t pt-4">
+              <div className="flex items-center justify-center gap-2">
+                <Star className="w-4 h-4 text-yellow-500" />
+                <span className="text-sm font-medium">
+                  {currentBatsman.name} batting
+                </span>
+                {isCurrentBatsman && (
+                  <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full">Your turn</span>
+                )}
+              </div>
+              <div className="text-center text-sm text-gray-600 mt-1">
+                {currentBatsman.runsScored} runs from {currentBatsman.ballsFaced} balls
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Timer */}
-        {timerActive && !moveSubmitted && (
+        {timerActive && isMyTurn && !moveSubmitted && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 text-center">
             <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center text-2xl font-bold ${getTimerColor()}`}>
               {timeLeft}
@@ -77,27 +122,39 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           </div>
         )}
 
+        {/* Waiting for turn */}
+        {isBatting && !isMyTurn && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 text-center">
+            <div className="w-16 h-16 bg-blue-500 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <Users className="w-8 h-8 text-white" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">Waiting for your turn</h3>
+            <p className="text-gray-600">{currentBatsman?.name} is batting</p>
+          </div>
+        )}
+
         {/* Move Display */}
         {bothMovesSubmitted && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
             <div className="flex justify-between items-center">
               <div className="text-center">
-                <div className="text-sm text-gray-500 mb-1">{currentPlayer.name}</div>
+                <div className="text-sm text-gray-500 mb-1">Batsman</div>
                 <div className="w-12 h-12 bg-blue-500 text-white rounded-full flex items-center justify-center text-xl font-bold">
-                  {currentPlayer.move}
+                  {currentBatsman?.move}
                 </div>
               </div>
               <div className="text-center">
                 <div className="text-lg">VS</div>
               </div>
               <div className="text-center">
-                <div className="text-sm text-gray-500 mb-1">{opponent.name}</div>
+                <div className="text-sm text-gray-500 mb-1">Bowler</div>
                 <div className="w-12 h-12 bg-red-500 text-white rounded-full flex items-center justify-center text-xl font-bold">
-                  {opponent.move}
+                  {/* Show opponent's move */}
+                  ?
                 </div>
               </div>
             </div>
-            {currentPlayer.move === opponent.move && (
+            {currentBatsman?.move === 0 && (
               <div className="text-center mt-4 text-red-500 font-bold">OUT!</div>
             )}
           </div>
@@ -118,7 +175,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         )}
 
         {/* Number Selection */}
-        {timerActive && !moveSubmitted && (
+        {timerActive && isMyTurn && !moveSubmitted && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">
               {isBatting ? 'Choose your batting number' : 'Choose your bowling number'}
@@ -160,14 +217,21 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           </div>
         )}
 
-        {/* Role Switch Message */}
-        {room.game_state === 'switch' && (
+        {/* Innings Break */}
+        {room.game_state === 'innings_break' && (
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
             <div className="w-16 h-16 bg-orange-500 rounded-full mx-auto mb-4 flex items-center justify-center">
               <Clock className="w-8 h-8 text-white" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Switching Roles!</h3>
-            <p className="text-gray-600">Get ready for the next innings...</p>
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">Innings Break!</h3>
+            <p className="text-gray-600">Teams are switching roles...</p>
+            {room.target && (
+              <div className="mt-4 p-4 bg-orange-50 rounded-lg">
+                <p className="text-orange-700 font-semibold">
+                  Target: {room.target} runs
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>

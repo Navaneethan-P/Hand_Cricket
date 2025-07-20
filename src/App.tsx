@@ -1,9 +1,10 @@
 import React from 'react';
 import { Toaster } from 'react-hot-toast';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { TossScreen } from './components/TossScreen';
-import { GameScreen } from './components/GameScreen';
-import { ResultScreen } from './components/ResultScreen';
+import { LobbyScreen } from './components/LobbyScreen';
+import { TeamTossScreen } from './components/TeamTossScreen';
+import { TeamGameScreen } from './components/TeamGameScreen';
+import { TeamResultScreen } from './components/TeamResultScreen';
 import { useGameState } from './hooks/useGameState';
 
 function App() {
@@ -15,6 +16,9 @@ function App() {
     moveSubmitted,
     createRoom,
     joinRoom,
+    shufflePlayers,
+    movePlayer,
+    startMatch,
     chooseRole,
     selectMove,
     submitMove,
@@ -30,9 +34,20 @@ function App() {
             onJoinRoom={joinRoom}
           />
         );
+      case 'lobby':
+        return gameState.room ? (
+          <LobbyScreen
+            room={gameState.room}
+            playerId={gameState.playerId}
+            isHost={gameState.isHost}
+            onShufflePlayers={shufflePlayers}
+            onMovePlayer={movePlayer}
+            onStartMatch={startMatch}
+          />
+        ) : null;
       case 'toss':
         return gameState.room ? (
-          <TossScreen
+          <TeamTossScreen
             room={gameState.room}
             playerId={gameState.playerId}
             onChooseRole={chooseRole}
@@ -40,7 +55,7 @@ function App() {
         ) : null;
       case 'game':
         return gameState.room ? (
-          <GameScreen
+          <TeamGameScreen
             room={gameState.room}
             playerId={gameState.playerId}
             timeLeft={timeLeft}
@@ -53,7 +68,7 @@ function App() {
         ) : null;
       case 'result':
         return gameState.room ? (
-          <ResultScreen
+          <TeamResultScreen
             room={gameState.room}
             playerId={gameState.playerId}
             onPlayAgain={resetGame}

@@ -1,8 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Room, GameState } from '../types/game';
+import { Room, GameState, Team, Player } from '../types/game';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
+
+interface MatchSettings {
+  maxPlayersPerTeam: number;
+  maxOvers: number;
+  teamAName: string;
+  teamBName: string;
+}
 
 export const useGameState = () => {
   const [gameState, setGameState] = useState<GameState>({
@@ -10,7 +17,8 @@ export const useGameState = () => {
     playerId: uuidv4(),
     playerName: '',
     isConnected: false,
-    currentScreen: 'welcome'
+    currentScreen: 'welcome',
+    isHost: false
   });
 
   const [timeLeft, setTimeLeft] = useState(3);
@@ -22,30 +30,18 @@ export const useGameState = () => {
   useEffect(() => {
     if (!gameState.room) return;
     
-    if (gameState.room.game_state === 'waiting') {
+    const { game_state } = gameState.room;
+    
+    if (game_state === 'waiting' || game_state === 'teamSetup') {
+      setGameState(prev => ({ ...prev, currentScreen: 'lobby' }));
+    } else if (game_state === 'toss' || game_state === 'chooseRole') {
       setGameState(prev => ({ ...prev, currentScreen: 'toss' }));
-    } else if (gameState.room.game_state === 'toss' || gameState.room.game_state === 'chooseRole') {
-      setGameState(prev => ({ ...prev, currentScreen: 'toss' }));
-    } else if (gameState.room.game_state === 'playing' || gameState.room.game_state === 'switch') {
+    } else if (game_state === 'playing' || game_state === 'innings_break') {
       setGameState(prev => ({ ...prev, currentScreen: 'game' }));
-    } else if (gameState.room.game_state === 'result') {
+    } else if (game_state === 'result') {
       setGameState(prev => ({ ...prev, currentScreen: 'result' }));
     }
   }, [gameState.room?.game_state]);
-
-  // Trigger toss when both players join
-  useEffect(() => {
-    if (gameState.room && 
-        gameState.room.player1 && 
-        gameState.room.player2 && 
-        gameState.room.game_state === 'toss' && 
-        !gameState.room.toss_winner) {
-      // Only trigger toss if we're player1 to avoid duplicate calls
-      if (gameState.room.player1.id === gameState.playerId) {
-        setTimeout(() => performToss(), 1000);
-      }
-    }
-  }, [gameState.room?.player1, gameState.room?.player2, gameState.room?.game_state, gameState.room?.toss_winner]);
 
   // Subscribe to room changes
   useEffect(() => {
@@ -97,26 +93,58 @@ export const useGameState = () => {
     return () => clearTimeout(timer);
   }, [timerActive, timeLeft, moveSubmitted]);
 
-  const createRoom = async (playerName: string) => {
+  const createRoom = async (playerName: string, settings: MatchSettings) => {
     try {
       const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
       
+      const newPlayer: Player = {
+        id: gameState.playerId,
+        name: playerName,
+        score: 0,
+        move: null,
+        isOut: false,
+        ballsFaced: 0,
+        runsScored: 0
+      };
+
+      const teamA: Team = {
+        id: 'teamA',
+        name: settings.teamAName,
+        players: [newPlayer],
+        totalScore: 0,
+        wickets: 0,
+        overs: 0,
+        balls: 0,
+        captain: gameState.playerId,
+        currentBatsman: null,
+        allOut: false
+      };
+
       const newRoom: Room = {
         id: roomId,
-        player1: {
-          id: gameState.playerId,
-          name: playerName,
-          score: 0,
-          move: null,
-          isOut: false
+        host: gameState.playerId,
+        teamA,
+        teamB: {
+          id: 'teamB',
+          name: settings.teamBName,
+          players: [],
+          totalScore: 0,
+          wickets: 0,
+          overs: 0,
+          balls: 0,
+          captain: '',
+          currentBatsman: null,
+          allOut: false
         },
-        player2: null,
         toss_winner: null,
         current_batting: null,
         current_bowling: null,
-        game_state: 'waiting',
+        game_state: 'teamSetup',
         current_round: 1,
         moves_submitted: 0,
+        target: null,
+        maxPlayers: settings.maxPlayersPerTeam * 2,
+        maxOvers: settings.maxOvers
       };
 
       const { error } = await supabase
@@ -130,7 +158,8 @@ export const useGameState = () => {
         room: newRoom,
         playerName,
         isConnected: true,
-        currentScreen: 'toss'
+        currentScreen: 'lobby',
+        isHost: true
       }));
 
       toast.success(`Room created! Code: ${roomId}`);
@@ -153,22 +182,47 @@ export const useGameState = () => {
         return;
       }
 
-      if (room.player2) {
+      const totalPlayers = (room.teamA?.players?.length || 0) + (room.teamB?.players?.length || 0);
+      if (totalPlayers >= room.maxPlayers) {
         toast.error('Room is full');
         return;
       }
 
-      const updatedRoom = {
-        ...room,
-        player2: {
-          id: gameState.playerId,
-          name: playerName,
-          score: 0,
-          move: null,
-          isOut: false
-        },
-        game_state: 'toss' as const
+      const newPlayer: Player = {
+        id: gameState.playerId,
+        name: playerName,
+        score: 0,
+        move: null,
+        isOut: false,
+        ballsFaced: 0,
+        runsScored: 0
       };
+
+      // Add to team with fewer players
+      const teamACount = room.teamA?.players?.length || 0;
+      const teamBCount = room.teamB?.players?.length || 0;
+      
+      let updatedRoom = { ...room };
+      
+      if (teamACount <= teamBCount) {
+        updatedRoom.teamA = {
+          ...updatedRoom.teamA,
+          players: [...(updatedRoom.teamA?.players || []), newPlayer]
+        };
+        // Set captain if first player in team
+        if (teamACount === 0) {
+          updatedRoom.teamA.captain = gameState.playerId;
+        }
+      } else {
+        updatedRoom.teamB = {
+          ...updatedRoom.teamB,
+          players: [...(updatedRoom.teamB?.players || []), newPlayer]
+        };
+        // Set captain if first player in team
+        if (teamBCount === 0) {
+          updatedRoom.teamB.captain = gameState.playerId;
+        }
+      }
 
       const { error: updateError } = await supabase
         .from('rooms')
@@ -182,7 +236,8 @@ export const useGameState = () => {
         room: updatedRoom,
         playerName,
         isConnected: true,
-        currentScreen: 'toss'
+        currentScreen: 'lobby',
+        isHost: false
       }));
 
       toast.success('Joined room successfully!');
@@ -193,13 +248,109 @@ export const useGameState = () => {
     }
   };
 
+  const shufflePlayers = async () => {
+    if (!gameState.room || !gameState.isHost) return;
+
+    const allPlayers = [
+      ...(gameState.room.teamA?.players || []),
+      ...(gameState.room.teamB?.players || [])
+    ];
+
+    // Shuffle array
+    const shuffled = [...allPlayers].sort(() => Math.random() - 0.5);
+    const midPoint = Math.ceil(shuffled.length / 2);
+
+    const newTeamA = {
+      ...gameState.room.teamA!,
+      players: shuffled.slice(0, midPoint),
+      captain: shuffled[0]?.id || ''
+    };
+
+    const newTeamB = {
+      ...gameState.room.teamB!,
+      players: shuffled.slice(midPoint),
+      captain: shuffled[midPoint]?.id || ''
+    };
+
+    const { error } = await supabase
+      .from('rooms')
+      .update({
+        teamA: newTeamA,
+        teamB: newTeamB
+      })
+      .eq('id', gameState.room.id);
+
+    if (error) {
+      console.error('Shuffle error:', error);
+      return;
+    }
+
+    toast.success('Teams shuffled!');
+  };
+
+  const movePlayer = async (playerId: string, toTeam: 'teamA' | 'teamB') => {
+    if (!gameState.room || !gameState.isHost) return;
+
+    const fromTeam = toTeam === 'teamA' ? 'teamB' : 'teamA';
+    const player = gameState.room[fromTeam]?.players.find(p => p.id === playerId);
+    
+    if (!player) return;
+
+    const updatedFromTeam = {
+      ...gameState.room[fromTeam]!,
+      players: gameState.room[fromTeam]!.players.filter(p => p.id !== playerId)
+    };
+
+    const updatedToTeam = {
+      ...gameState.room[toTeam]!,
+      players: [...gameState.room[toTeam]!.players, player]
+    };
+
+    // Update captain if needed
+    if (updatedFromTeam.captain === playerId && updatedFromTeam.players.length > 0) {
+      updatedFromTeam.captain = updatedFromTeam.players[0].id;
+    }
+    if (updatedToTeam.players.length === 1) {
+      updatedToTeam.captain = playerId;
+    }
+
+    const { error } = await supabase
+      .from('rooms')
+      .update({
+        [fromTeam]: updatedFromTeam,
+        [toTeam]: updatedToTeam
+      })
+      .eq('id', gameState.room.id);
+
+    if (error) {
+      console.error('Move player error:', error);
+      return;
+    }
+  };
+
+  const startMatch = async () => {
+    if (!gameState.room || !gameState.isHost) return;
+
+    const { error } = await supabase
+      .from('rooms')
+      .update({
+        game_state: 'toss'
+      })
+      .eq('id', gameState.room.id);
+
+    if (error) {
+      console.error('Start match error:', error);
+      return;
+    }
+
+    // Trigger toss after a delay
+    setTimeout(() => performToss(), 1000);
+  };
+
   const performToss = async () => {
-    if (!gameState.room) return;
+    if (!gameState.room || !gameState.isHost) return;
 
-    // Only perform toss if we're in toss state and no winner yet
-    if (gameState.room.game_state !== 'toss' || gameState.room.toss_winner) return;
-
-    const tossResult = Math.random() < 0.5 ? 'player1' : 'player2';
+    const tossResult = Math.random() < 0.5 ? 'teamA' : 'teamB';
     
     const { error } = await supabase
       .from('rooms')
@@ -214,33 +365,41 @@ export const useGameState = () => {
       return;
     }
 
-    const winner = tossResult === 'player1' ? gameState.room.player1?.name : gameState.room.player2?.name;
+    const winner = tossResult === 'teamA' ? gameState.room.teamA?.name : gameState.room.teamB?.name;
     toast.success(`${winner} won the toss!`);
   };
 
   const chooseRole = async (role: 'bat' | 'bowl') => {
     if (!gameState.room || !gameState.room.toss_winner) return;
 
-    const isPlayer1 = gameState.room.player1?.id === gameState.playerId;
-    const isTossWinner = (isPlayer1 && gameState.room.toss_winner === 'player1') || 
-                        (!isPlayer1 && gameState.room.toss_winner === 'player2');
+    const playerTeam = gameState.room.teamA?.players.find(p => p.id === gameState.playerId) ? 'teamA' : 'teamB';
+    const isTossWinner = gameState.room.toss_winner === playerTeam;
+    const isCaptain = (playerTeam === 'teamA' ? gameState.room.teamA?.captain : gameState.room.teamB?.captain) === gameState.playerId;
 
-    if (!isTossWinner) {
-      toast.error('Wait for toss winner to choose');
+    if (!isTossWinner || !isCaptain) {
+      toast.error('Only the winning captain can choose');
       return;
     }
 
     const currentBatting = role === 'bat' ? gameState.room.toss_winner : 
-                          (gameState.room.toss_winner === 'player1' ? 'player2' : 'player1');
+                          (gameState.room.toss_winner === 'teamA' ? 'teamB' : 'teamA');
     const currentBowling = role === 'bowl' ? gameState.room.toss_winner : 
-                          (gameState.room.toss_winner === 'player1' ? 'player2' : 'player1');
+                          (gameState.room.toss_winner === 'teamA' ? 'teamB' : 'teamA');
+
+    // Set first batsman
+    const battingTeam = currentBatting === 'teamA' ? gameState.room.teamA! : gameState.room.teamB!;
+    const updatedBattingTeam = {
+      ...battingTeam,
+      currentBatsman: battingTeam.players[0]?.id || null
+    };
 
     const { error } = await supabase
       .from('rooms')
       .update({
         current_batting: currentBatting,
         current_bowling: currentBowling,
-        game_state: 'playing'
+        game_state: 'playing',
+        [currentBatting]: updatedBattingTeam
       })
       .eq('id', gameState.room.id);
 
@@ -249,7 +408,6 @@ export const useGameState = () => {
       return;
     }
 
-    setGameState(prev => ({ ...prev, currentScreen: 'game' }));
     startNewRound();
   };
 
@@ -271,81 +429,136 @@ export const useGameState = () => {
     setMoveSubmitted(true);
     setTimerActive(false);
 
-    const isPlayer1 = gameState.room.player1?.id === gameState.playerId;
-    const playerKey = isPlayer1 ? 'player1' : 'player2';
+    const playerTeam = gameState.room.teamA?.players.find(p => p.id === gameState.playerId) ? 'teamA' : 'teamB';
+    const isBatting = gameState.room.current_batting === playerTeam;
+    const team = gameState.room[playerTeam]!;
     
-    const updatedPlayer = {
-      ...gameState.room[playerKey],
-      move
-    };
+    // Update current batsman's move
+    if (isBatting && team.currentBatsman === gameState.playerId) {
+      const updatedPlayers = team.players.map(p => 
+        p.id === gameState.playerId ? { ...p, move } : p
+      );
+      
+      const updatedTeam = {
+        ...team,
+        players: updatedPlayers
+      };
 
-    const newMovesSubmitted = gameState.room.moves_submitted + 1;
+      const { error } = await supabase
+        .from('rooms')
+        .update({
+          [playerTeam]: updatedTeam,
+          moves_submitted: gameState.room.moves_submitted + 1
+        })
+        .eq('id', gameState.room.id);
 
-    const { error } = await supabase
-      .from('rooms')
-      .update({
-        [playerKey]: updatedPlayer,
-        moves_submitted: newMovesSubmitted
-      })
-      .eq('id', gameState.room.id);
-
-    if (error) {
-      console.error('Move submission error:', error);
-      return;
+      if (error) {
+        console.error('Move submission error:', error);
+        return;
+      }
     }
 
-    // If both players have submitted, process the round
-    if (newMovesSubmitted === 2) {
+    // Process round if both moves submitted
+    if (gameState.room.moves_submitted + 1 === 2) {
       setTimeout(() => processRound(), 1000);
     }
   };
 
   const processRound = async () => {
-    if (!gameState.room || !gameState.room.player1 || !gameState.room.player2) return;
+    if (!gameState.room) return;
 
-    const player1Move = gameState.room.player1.move!;
-    const player2Move = gameState.room.player2.move!;
-    const battingPlayer = gameState.room.current_batting === 'player1' ? 'player1' : 'player2';
-    const batsmanMove = gameState.room[battingPlayer]!.move!;
+    const battingTeam = gameState.room.current_batting === 'teamA' ? gameState.room.teamA! : gameState.room.teamB!;
+    const bowlingTeam = gameState.room.current_batting === 'teamA' ? gameState.room.teamB! : gameState.room.teamA!;
+    
+    const currentBatsman = battingTeam.players.find(p => p.id === battingTeam.currentBatsman);
+    if (!currentBatsman) return;
 
-    let updatedRoom = { ...gameState.room };
+    const batsmanMove = currentBatsman.move!;
+    const bowlerMove = 3; // Random bowler move for now
+
+    let updatedBattingTeam = { ...battingTeam };
+    let gameOver = false;
+    let inningsOver = false;
 
     // Check if OUT
-    if (player1Move === player2Move) {
+    if (batsmanMove === bowlerMove) {
       // Batsman is OUT
-      updatedRoom[battingPlayer] = {
-        ...updatedRoom[battingPlayer]!,
-        isOut: true
-      };
+      updatedBattingTeam.wickets += 1;
       
-      toast.error('OUT!');
-      
-      // Check if both players have batted
-      if (gameState.room.current_batting === gameState.room.toss_winner) {
-        // Switch roles
-        updatedRoom.current_batting = gameState.room.current_bowling;
-        updatedRoom.current_bowling = gameState.room.current_batting;
-        updatedRoom.game_state = 'switch';
-        toast.success('Switching roles!');
+      // Update batsman stats
+      updatedBattingTeam.players = updatedBattingTeam.players.map(p => 
+        p.id === currentBatsman.id 
+          ? { ...p, isOut: true, ballsFaced: p.ballsFaced + 1, move: null }
+          : { ...p, move: null }
+      );
+
+      toast.error(`${currentBatsman.name} is OUT!`);
+
+      // Check if all out or find next batsman
+      const nextBatsman = updatedBattingTeam.players.find(p => !p.isOut && p.id !== currentBatsman.id);
+      if (nextBatsman) {
+        updatedBattingTeam.currentBatsman = nextBatsman.id;
       } else {
-        // Game over
-        updatedRoom.game_state = 'result';
-        setGameState(prev => ({ ...prev, currentScreen: 'result' }));
+        updatedBattingTeam.allOut = true;
+        inningsOver = true;
       }
     } else {
-      // Add score
-      updatedRoom[battingPlayer] = {
-        ...updatedRoom[battingPlayer]!,
-        score: updatedRoom[battingPlayer]!.score + batsmanMove
-      };
-      toast.success(`+${batsmanMove} runs!`);
+      // Add runs
+      updatedBattingTeam.totalScore += batsmanMove;
+      
+      // Update batsman stats
+      updatedBattingTeam.players = updatedBattingTeam.players.map(p => 
+        p.id === currentBatsman.id 
+          ? { 
+              ...p, 
+              runsScored: p.runsScored + batsmanMove,
+              ballsFaced: p.ballsFaced + 1,
+              move: null 
+            }
+          : { ...p, move: null }
+      );
+
+      toast.success(`${batsmanMove} runs scored!`);
     }
 
-    // Reset moves and counter
-    updatedRoom.player1.move = null;
-    updatedRoom.player2.move = null;
-    updatedRoom.moves_submitted = 0;
-    updatedRoom.current_round += 1;
+    // Update balls and overs
+    updatedBattingTeam.balls += 1;
+    if (updatedBattingTeam.balls % 6 === 0) {
+      updatedBattingTeam.overs += 1;
+      if (updatedBattingTeam.overs >= gameState.room.maxOvers) {
+        inningsOver = true;
+      }
+    }
+
+    // Check if target achieved
+    if (gameState.room.target && updatedBattingTeam.totalScore >= gameState.room.target) {
+      gameOver = true;
+    }
+
+    let updatedRoom = {
+      ...gameState.room,
+      [gameState.room.current_batting!]: updatedBattingTeam,
+      moves_submitted: 0,
+      current_round: gameState.room.current_round + 1
+    };
+
+    if (inningsOver && !gameState.room.target) {
+      // First innings over, set target and switch
+      updatedRoom.target = updatedBattingTeam.totalScore + 1;
+      updatedRoom.current_batting = gameState.room.current_bowling;
+      updatedRoom.current_bowling = gameState.room.current_batting;
+      updatedRoom.game_state = 'innings_break';
+      
+      // Set first batsman for new batting team
+      const newBattingTeam = updatedRoom.current_batting === 'teamA' ? updatedRoom.teamA! : updatedRoom.teamB!;
+      updatedRoom[updatedRoom.current_batting!] = {
+        ...newBattingTeam,
+        currentBatsman: newBattingTeam.players[0]?.id || null
+      };
+    } else if (inningsOver || gameOver) {
+      // Match over
+      updatedRoom.game_state = 'result';
+    }
 
     const { error } = await supabase
       .from('rooms')
@@ -360,7 +573,7 @@ export const useGameState = () => {
     // Continue game if not ended
     if (updatedRoom.game_state === 'playing') {
       setTimeout(() => startNewRound(), 2000);
-    } else if (updatedRoom.game_state === 'switch') {
+    } else if (updatedRoom.game_state === 'innings_break') {
       setTimeout(async () => {
         const { error: switchError } = await supabase
           .from('rooms')
@@ -390,7 +603,8 @@ export const useGameState = () => {
       ...prev,
       room: null,
       isConnected: false,
-      currentScreen: 'welcome'
+      currentScreen: 'welcome',
+      isHost: false
     }));
 
     setTimeLeft(3);
@@ -407,6 +621,9 @@ export const useGameState = () => {
     moveSubmitted,
     createRoom,
     joinRoom,
+    shufflePlayers,
+    movePlayer,
+    startMatch,
     chooseRole,
     selectMove,
     submitMove: () => submitMove(selectedMove || 0),
