@@ -22,7 +22,9 @@ export const useGameState = () => {
   useEffect(() => {
     if (!gameState.room) return;
     
-    if (gameState.room.game_state === 'toss' || gameState.room.game_state === 'chooseRole') {
+    if (gameState.room.game_state === 'waiting') {
+      setGameState(prev => ({ ...prev, currentScreen: 'toss' }));
+    } else if (gameState.room.game_state === 'toss' || gameState.room.game_state === 'chooseRole') {
       setGameState(prev => ({ ...prev, currentScreen: 'toss' }));
     } else if (gameState.room.game_state === 'playing' || gameState.room.game_state === 'switch') {
       setGameState(prev => ({ ...prev, currentScreen: 'game' }));
@@ -31,18 +33,19 @@ export const useGameState = () => {
     }
   }, [gameState.room?.game_state]);
 
-  // Update screen based on room state changes
+  // Trigger toss when both players join
   useEffect(() => {
-    if (!gameState.room) return;
-    
-    if (gameState.room.game_state === 'toss' || gameState.room.game_state === 'chooseRole') {
-      setGameState(prev => ({ ...prev, currentScreen: 'toss' }));
-    } else if (gameState.room.game_state === 'playing' || gameState.room.game_state === 'switch') {
-      setGameState(prev => ({ ...prev, currentScreen: 'game' }));
-    } else if (gameState.room.game_state === 'result') {
-      setGameState(prev => ({ ...prev, currentScreen: 'result' }));
+    if (gameState.room && 
+        gameState.room.player1 && 
+        gameState.room.player2 && 
+        gameState.room.game_state === 'toss' && 
+        !gameState.room.toss_winner) {
+      // Only trigger toss if we're player1 to avoid duplicate calls
+      if (gameState.room.player1.id === gameState.playerId) {
+        setTimeout(() => performToss(), 1000);
+      }
     }
-  }, [gameState.room?.game_state]);
+  }, [gameState.room?.player1, gameState.room?.player2, gameState.room?.game_state, gameState.room?.toss_winner]);
 
   // Subscribe to room changes
   useEffect(() => {
@@ -184,8 +187,6 @@ export const useGameState = () => {
 
       toast.success('Joined room successfully!');
       
-      // Trigger toss automatically
-      setTimeout(() => performToss(), 1000);
     } catch (error) {
       toast.error('Failed to join room');
       console.error(error);
@@ -194,6 +195,9 @@ export const useGameState = () => {
 
   const performToss = async () => {
     if (!gameState.room) return;
+
+    // Only perform toss if we're in toss state and no winner yet
+    if (gameState.room.game_state !== 'toss' || gameState.room.toss_winner) return;
 
     const tossResult = Math.random() < 0.5 ? 'player1' : 'player2';
     
