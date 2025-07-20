@@ -91,6 +91,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 <option value={4}>4 players</option>
                 <option value={5}>5 players</option>
                 <option value={6}>6 players</option>
+                <option value={1}>1 player</option>
               </select>
             </div>
 

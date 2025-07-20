@@ -26,6 +26,38 @@ export const useGameState = () => {
   const [selectedMove, setSelectedMove] = useState<number | null>(null);
   const [moveSubmitted, setMoveSubmitted] = useState(false);
 
+  // Real-time room subscription
+  useEffect(() => {
+    if (!gameState.room?.id) return;
+
+    const channel = supabase
+      .channel(`room:${gameState.room.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'rooms',
+          filter: `id=eq.${gameState.room.id}`
+        },
+        async (payload) => {
+          if (payload.new) {
+            const roomData = payload.new as any;
+            const updatedRoom = await reconstructRoomFromDatabase(roomData);
+            setGameState(prev => ({
+              ...prev,
+              room: updatedRoom
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [gameState.room?.id]);
+
   // Update screen based on room state changes
   useEffect(() => {
     if (!gameState.room) return;
@@ -42,36 +74,6 @@ export const useGameState = () => {
       setGameState(prev => ({ ...prev, currentScreen: 'result' }));
     }
   }, [gameState.room?.game_state]);
-
-  // Subscribe to room changes
-  useEffect(() => {
-    if (!gameState.room?.id) return;
-
-    const channel = supabase
-      .channel(`room:${gameState.room.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'rooms',
-          filter: `id=eq.${gameState.room.id}`
-        },
-        (payload) => {
-          if (payload.new) {
-            setGameState(prev => ({
-              ...prev,
-              room: payload.new as Room
-            }));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [gameState.room?.id]);
 
   // Timer logic
   useEffect(() => {
@@ -92,6 +94,91 @@ export const useGameState = () => {
 
     return () => clearTimeout(timer);
   }, [timerActive, timeLeft, moveSubmitted]);
+
+  const reconstructRoomFromDatabase = async (roomData: any): Promise<Room> => {
+    const allPlayers: Player[] = [];
+    
+    // Collect all players from database
+    if (roomData.player1) {
+      allPlayers.push({
+        id: roomData.player1.id,
+        name: roomData.player1.name,
+        score: 0,
+        move: null,
+        isOut: false,
+        ballsFaced: 0,
+        runsScored: 0
+      });
+    }
+    
+    if (roomData.player2) {
+      allPlayers.push({
+        id: roomData.player2.id,
+        name: roomData.player2.name,
+        score: 0,
+        move: null,
+        isOut: false,
+        ballsFaced: 0,
+        runsScored: 0
+      });
+    }
+
+    // Add more players from stored data if available
+    if (roomData.player1?.allPlayers) {
+      roomData.player1.allPlayers.forEach((p: any) => {
+        if (!allPlayers.find(existing => existing.id === p.id)) {
+          allPlayers.push(p);
+        }
+      });
+    }
+
+    // Distribute players into teams
+    const maxPerTeam = roomData.player1?.maxPlayersPerTeam || 3;
+    const teamAPlayers = allPlayers.slice(0, Math.ceil(allPlayers.length / 2));
+    const teamBPlayers = allPlayers.slice(Math.ceil(allPlayers.length / 2));
+
+    const teamA: Team = {
+      id: 'teamA',
+      name: roomData.player1?.teamName || 'Team A',
+      players: teamAPlayers,
+      totalScore: 0,
+      wickets: 0,
+      overs: 0,
+      balls: 0,
+      captain: teamAPlayers[0]?.id || '',
+      currentBatsman: null,
+      allOut: false
+    };
+
+    const teamB: Team = {
+      id: 'teamB',
+      name: roomData.player1?.teamBName || 'Team B',
+      players: teamBPlayers,
+      totalScore: 0,
+      wickets: 0,
+      overs: 0,
+      balls: 0,
+      captain: teamBPlayers[0]?.id || '',
+      currentBatsman: null,
+      allOut: false
+    };
+
+    return {
+      id: roomData.id,
+      host: roomData.player1?.id || '',
+      teamA,
+      teamB,
+      toss_winner: roomData.toss_winner,
+      current_batting: roomData.current_batting,
+      current_bowling: roomData.current_bowling,
+      game_state: roomData.game_state,
+      current_round: roomData.current_round,
+      moves_submitted: roomData.moves_submitted,
+      target: null,
+      maxPlayers: (roomData.player1?.maxPlayersPerTeam || 3) * 2,
+      maxOvers: roomData.player1?.maxOvers || 2
+    };
+  };
 
   const createRoom = async (playerName: string, settings: MatchSettings) => {
     try {
@@ -117,7 +204,8 @@ export const useGameState = () => {
           maxPlayersPerTeam: settings.maxPlayersPerTeam,
           maxOvers: settings.maxOvers,
           teamBName: settings.teamBName,
-          isHost: true
+          isHost: true,
+          allPlayers: [newPlayer]
         },
         player2: null,
         toss_winner: null,
@@ -204,8 +292,11 @@ export const useGameState = () => {
         return;
       }
 
-      // Check if room is full (simple 2-player check for now)
-      if (room.player2) {
+      // Check if room is full
+      const currentPlayerCount = (room.player1?.allPlayers?.length || 1) + (room.player2 ? 1 : 0);
+      const maxPlayers = (room.player1?.maxPlayersPerTeam || 3) * 2;
+      
+      if (currentPlayerCount >= maxPlayers) {
         toast.error('Room is full');
         return;
       }
@@ -228,6 +319,21 @@ export const useGameState = () => {
           name: playerName,
           isHost: false
         },
+        player1: {
+          ...room.player1,
+          allPlayers: [
+            ...(room.player1?.allPlayers || [{
+              id: room.player1?.id || '',
+              name: room.player1?.name || '',
+              score: 0,
+              move: null,
+              isOut: false,
+              ballsFaced: 0,
+              runsScored: 0
+            }]),
+            newPlayer
+          ]
+        },
         game_state: 'teamSetup'
       };
 
@@ -238,56 +344,8 @@ export const useGameState = () => {
 
       if (updateError) throw updateError;
 
-      // Create local room state
-      const teamA: Team = {
-        id: 'teamA',
-        name: room.player1?.teamName || 'Team A',
-        players: [{
-          id: room.player1?.id || '',
-          name: room.player1?.name || '',
-          score: 0,
-          move: null,
-          isOut: false,
-          ballsFaced: 0,
-          runsScored: 0
-        }],
-        totalScore: 0,
-        wickets: 0,
-        overs: 0,
-        balls: 0,
-        captain: room.player1?.id || '',
-        currentBatsman: null,
-        allOut: false
-      };
-
-      const teamB: Team = {
-        id: 'teamB',
-        name: room.player1?.teamBName || 'Team B',
-        players: [newPlayer],
-        totalScore: 0,
-        wickets: 0,
-        overs: 0,
-        balls: 0,
-        captain: gameState.playerId,
-        currentBatsman: null,
-        allOut: false
-      };
-
-      const updatedRoom: Room = {
-        id: roomId,
-        host: room.player1?.id || '',
-        teamA,
-        teamB,
-        toss_winner: null,
-        current_batting: null,
-        current_bowling: null,
-        game_state: 'teamSetup',
-        current_round: 1,
-        moves_submitted: 0,
-        target: null,
-        maxPlayers: (room.player1?.maxPlayersPerTeam || 3) * 2,
-        maxOvers: room.player1?.maxOvers || 2
-      };
+      // Reconstruct room from updated data
+      const updatedRoom = await reconstructRoomFromDatabase(updatedRoomData);
 
       setGameState(prev => ({
         ...prev,
