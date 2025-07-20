@@ -107,6 +107,34 @@ export const useGameState = () => {
         runsScored: 0
       };
 
+      // Create room data that matches database schema
+      const roomData = {
+        id: roomId,
+        player1: {
+          id: gameState.playerId,
+          name: playerName,
+          teamName: settings.teamAName,
+          maxPlayersPerTeam: settings.maxPlayersPerTeam,
+          maxOvers: settings.maxOvers,
+          teamBName: settings.teamBName,
+          isHost: true
+        },
+        player2: null,
+        toss_winner: null,
+        current_batting: null,
+        current_bowling: null,
+        game_state: 'waiting',
+        current_round: 1,
+        moves_submitted: 0,
+      };
+
+      const { error } = await supabase
+        .from('rooms')
+        .insert([roomData]);
+
+      if (error) throw error;
+
+      // Create the local room object for state management
       const teamA: Team = {
         id: 'teamA',
         name: settings.teamAName,
@@ -147,12 +175,6 @@ export const useGameState = () => {
         maxOvers: settings.maxOvers
       };
 
-      const { error } = await supabase
-        .from('rooms')
-        .insert([newRoom]);
-
-      if (error) throw error;
-
       setGameState(prev => ({
         ...prev,
         room: newRoom,
@@ -182,8 +204,8 @@ export const useGameState = () => {
         return;
       }
 
-      const totalPlayers = (room.teamA?.players?.length || 0) + (room.teamB?.players?.length || 0);
-      if (totalPlayers >= room.maxPlayers) {
+      // Check if room is full (simple 2-player check for now)
+      if (room.player2) {
         toast.error('Room is full');
         return;
       }
@@ -198,38 +220,74 @@ export const useGameState = () => {
         runsScored: 0
       };
 
-      // Add to team with fewer players
-      const teamACount = room.teamA?.players?.length || 0;
-      const teamBCount = room.teamB?.players?.length || 0;
-      
-      let updatedRoom = { ...room };
-      
-      if (teamACount <= teamBCount) {
-        updatedRoom.teamA = {
-          ...updatedRoom.teamA,
-          players: [...(updatedRoom.teamA?.players || []), newPlayer]
-        };
-        // Set captain if first player in team
-        if (teamACount === 0) {
-          updatedRoom.teamA.captain = gameState.playerId;
-        }
-      } else {
-        updatedRoom.teamB = {
-          ...updatedRoom.teamB,
-          players: [...(updatedRoom.teamB?.players || []), newPlayer]
-        };
-        // Set captain if first player in team
-        if (teamBCount === 0) {
-          updatedRoom.teamB.captain = gameState.playerId;
-        }
-      }
+      // Update database with player2
+      const updatedRoomData = {
+        ...room,
+        player2: {
+          id: gameState.playerId,
+          name: playerName,
+          isHost: false
+        },
+        game_state: 'teamSetup'
+      };
 
       const { error: updateError } = await supabase
         .from('rooms')
-        .update(updatedRoom)
+        .update(updatedRoomData)
         .eq('id', roomId);
 
       if (updateError) throw updateError;
+
+      // Create local room state
+      const teamA: Team = {
+        id: 'teamA',
+        name: room.player1?.teamName || 'Team A',
+        players: [{
+          id: room.player1?.id || '',
+          name: room.player1?.name || '',
+          score: 0,
+          move: null,
+          isOut: false,
+          ballsFaced: 0,
+          runsScored: 0
+        }],
+        totalScore: 0,
+        wickets: 0,
+        overs: 0,
+        balls: 0,
+        captain: room.player1?.id || '',
+        currentBatsman: null,
+        allOut: false
+      };
+
+      const teamB: Team = {
+        id: 'teamB',
+        name: room.player1?.teamBName || 'Team B',
+        players: [newPlayer],
+        totalScore: 0,
+        wickets: 0,
+        overs: 0,
+        balls: 0,
+        captain: gameState.playerId,
+        currentBatsman: null,
+        allOut: false
+      };
+
+      const updatedRoom: Room = {
+        id: roomId,
+        host: room.player1?.id || '',
+        teamA,
+        teamB,
+        toss_winner: null,
+        current_batting: null,
+        current_bowling: null,
+        game_state: 'teamSetup',
+        current_round: 1,
+        moves_submitted: 0,
+        target: null,
+        maxPlayers: (room.player1?.maxPlayersPerTeam || 3) * 2,
+        maxOvers: room.player1?.maxOvers || 2
+      };
 
       setGameState(prev => ({
         ...prev,
